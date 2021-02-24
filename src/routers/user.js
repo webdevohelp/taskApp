@@ -1,8 +1,9 @@
 const express = require('express');
+const multer = require('multer');
 const router = new express.Router();
 const User = require('../models/user');
+const auth = require('../middleware/auth');
 
-//Users
 //to save new user
 router.post('/users', async (req, res) => {
     const user = new User(req.body);
@@ -15,16 +16,15 @@ router.post('/users', async (req, res) => {
     }
 });
 
-//create tokens for new user
-
-//Login process
-//tokens etc management
+//Login User
 router.post('/users/login', async (req, res) => {
     try {
         const user = await User.findByCredentials(
             req.body.email,
             req.body.password
         );
+
+        // creating token for 'user' instance defined above
         const token = await user.generateAuthToken();
         res.send({ user, token });
     } catch (e) {
@@ -32,29 +32,42 @@ router.post('/users/login', async (req, res) => {
     }
 });
 
-//to see all the users from db
-router.get('/users', async (req, res) => {
+//logout user
+router.post('/users/logout', auth, async (req, res) => {
     try {
-        const users = await User.find({});
-        res.status(200).send(users);
+        req.user.tokens = req.user.tokens.filter((token) => {
+            return token.token !== req.token;
+        });
+        await req.user.save();
+        res.send();
     } catch (e) {
         res.status(500).send();
     }
 });
 
-//to see specific user from db
-router.get('/users/:id', async (req, res) => {
+//logout User from all sessions
+router.post('/users/logoutAll', auth, async (req, res) => {
     try {
-        const _id = req.params.id;
-        const user = await User.findById({ _id });
-        if (!user) res.status(404).send('User not found!');
-        res.status(200).send(user);
+        req.user.tokens = req.user.tokens.filter((token) => {
+            return false;
+        });
+        //or we can do the following
+        //req.user.tokens = [];
+        await req.user.save();
+        res.send('Logged out of all devices!');
     } catch (e) {
-        res.status(500).send(e);
+        res.status(500).send('Server error');
     }
 });
+
+//to see the currently authenticated user from db
+router.get('/users/me', auth, async (req, res) => {
+    // in `auth` we have created a new property named `req.user` that has currently authenticated user
+    res.send(req.user);
+});
+
 //to update a user
-router.patch('/users/:id', async (req, res) => {
+router.patch('/users/me', auth, async (req, res) => {
     //obj.keys returns array of keys in object
     const updates = Object.keys(req.body);
     const allowedUpdates = ['name', 'email', 'password', 'age'];
@@ -65,28 +78,35 @@ router.patch('/users/:id', async (req, res) => {
     if (!isValidOperation) {
         return res.status(400).send({ error: 'Invalid Updates!' });
     }
-
     try {
-        //read user data from db
-        const user = await User.findById(req.params.id);
+        //read user data from auth
+        const user = req.user;
         //update user data with new data
         updates.forEach((update) => (user[update] = req.body[update]));
         //save user data back to db
         await user.save();
-        if (!user) res.status(404).send();
         res.send(user);
     } catch (e) {
         res.status(400).send(e);
     }
 });
+
 //delete a user
-router.delete('/users/:id', async (req, res) => {
+router.delete('/users/me', auth, async (req, res) => {
     try {
-        const user = await User.findByIdAndDelete(req.params.id);
-        if (!user) res.status(404).send('User not found!');
-        res.send(user);
+        //req.user is from auth(middleware folder)
+        await req.user.remove();
+        res.send(req.user);
     } catch (e) {
         res.status(500).send(e);
     }
 });
 module.exports = router;
+
+//upload profile pic for current user
+const upload = multer({
+    dest: 'avatars',
+});
+router.post('/users/me/avatar', upload.single('avatar'), (req, res) => {
+    res.send();
+});
